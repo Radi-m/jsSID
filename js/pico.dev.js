@@ -12,6 +12,10 @@
   if (typeof AudioContext !== "undefined") {
     ImplClass = function(sys) {
       var context = new AudioContext();
+      // expose context for external debugging if not already
+      if(!window.__picoAudioCtx) {
+        window.__picoAudioCtx = context;
+      }
       var bufSrc, jsNode;
 
       this.maxSamplerate     = context.sampleRate;
@@ -31,7 +35,8 @@
         var sys_streamsize = sys.streamsize;
         var x, dx;
 
-        context.resume();
+  context.resume();
+  window.__picoAudioCtxState = context.state;
         if (sys.samplerate === context.sampleRate) {
           onaudioprocess = function(e) {
             var outs = e.outputBuffer;
@@ -84,12 +89,23 @@
         } else {
           jsNode = context.createJavaScriptNode(jsn_streamsize, 2, sys.channels);
         }
-        jsNode.onaudioprocess = onaudioprocess;
-        if (bufSrc.noteOn) {
-          bufSrc.noteOn(0);
-          bufSrc.connect(jsNode);
-        }
+        jsNode.onaudioprocess = function(e){
+          onaudioprocess(e);
+          // simple energy measurement for debugging
+          var ch0 = e.outputBuffer.getChannelData(0);
+          var energy=0; for(var i=0;i<ch0.length;i++){ energy += Math.abs(ch0[i]); }
+          window.__picoLastEnergy = energy;
+        };
+        // connect processing chain
+        bufSrc.connect(jsNode);
         jsNode.connect(context.destination);
+        // start immediately (empty buffer source just keeps context alive)
+        if (typeof bufSrc.start === 'function') {
+          try { bufSrc.start(0); } catch(e){ console.warn('BufferSource start failed', e); }
+        } else if (bufSrc.noteOn) {
+          try { bufSrc.noteOn(0); } catch(e){ console.warn('BufferSource noteOn failed', e); }
+        }
+        window.__picoStarted = true;
       };
 
       this.pause = function() {
